@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap');
+
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.view-enter {
+  animation: view-enter 260ms ease-out both;
+}
+
+.problem-card {
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.problem-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(23, 77, 59, 0.35);
+  box-shadow: 0 12px 28px rgba(32, 44, 38, 0.1);
+}
+
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-enter {
+    animation: none;
+  }
+
+  .problem-card {
+    transition: none;
+  }
+}
