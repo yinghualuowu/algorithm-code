@@ -11,14 +11,11 @@ import {
   Tabs, Typography,
 } from '@mui/material'
 import type { PaletteMode } from '@mui/material'
-import { Highlight, themes } from 'prism-react-renderer'
-import type { Language } from 'prism-react-renderer'
-import ReactMarkdown from 'react-markdown'
-import rehypeKatex from 'rehype-katex'
-import remarkMath from 'remark-math'
 import type { Problem, SyncStatus } from '../model'
 import { statusMeta } from '../model'
 import { downloadJson } from '../data'
+import { algorithmById } from '../algorithmCatalog'
+import { MarkdownContent, SyntaxCode } from './RichContent'
 
 interface Props {
   problem: Problem
@@ -67,7 +64,11 @@ export default function ProblemDetail({ problem, mode, readOnly = false, syncSta
           </Stack>
           <Typography variant="h3">{problem.title}</Typography>
           <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 2 }}>
-            {problem.tags.map((tag) => <Chip key={tag} clickable size="small" label={`#${tag}`} onClick={() => onTag(tag)} />)}
+            {problem.algorithmIds.map((id) => {
+              const tag = algorithmById.get(id)
+              return tag ? <Chip key={id} color="primary" size="small" label={tag.name} /> : null
+            })}
+            {problem.customTags.map((tag) => <Chip key={tag} clickable variant="outlined" size="small" label={`#${tag}`} onClick={() => onTag(tag)} />)}
           </Stack>
         </Box>
         <Stack direction="row" sx={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 1 }}>
@@ -102,7 +103,7 @@ export default function ProblemDetail({ problem, mode, readOnly = false, syncSta
               </Stack>
             )}
           </Section>
-          <Section title="备注与总结"><MarkdownNotes value={problem.notes} mode={mode} /></Section>
+          <Section title="备注与总结"><MarkdownContent value={problem.notes} mode={mode} empty="暂无总结" /></Section>
         </Stack>
         <Stack spacing={2}>
           <Paper variant="outlined" sx={{ p: 2 }}>
@@ -173,74 +174,3 @@ function AlertHint({ index, hint }: { index: number; hint: string }) {
   )
 }
 
-function MarkdownNotes({ value, mode }: { value: string; mode: PaletteMode }) {
-  if (!value.trim()) return <Typography color="text.secondary">暂无总结</Typography>
-  const normalized = value
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression: string) => `$${expression}$`)
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression: string) => '$$' + expression + '$$')
-  return (
-    <Box sx={{
-      lineHeight: 1.8,
-      '& p': { my: 1 },
-      '& pre': { overflow: 'auto', p: 2, borderRadius: 1, bgcolor: 'grey.100' },
-      '& code': { fontFamily: 'monospace' },
-      '& .katex-display': { overflowX: 'auto', overflowY: 'hidden' },
-    }}>
-      <ReactMarkdown
-        remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{
-          pre: ({ children }) => <>{children}</>,
-          code: ({ className, children }) => {
-            const language = /language-([\w+-]+)/.exec(className ?? '')?.[1]
-            return language
-              ? <SyntaxCode code={String(children).replace(/\n$/, '')} language={language} mode={mode} />
-              : <Box component="code" sx={{ px: 0.5, borderRadius: 0.5, bgcolor: 'action.hover' }}>{children}</Box>
-          },
-        }}
-      >
-        {normalized}
-      </ReactMarkdown>
-    </Box>
-  )
-}
-
-const languageAliases: Record<string, Language> = {
-  typescript: 'typescript',
-  ts: 'typescript',
-  javascript: 'javascript',
-  js: 'javascript',
-  python: 'python',
-  py: 'python',
-  'c++': 'cpp',
-  cpp: 'cpp',
-  c: 'c',
-  java: 'java',
-  go: 'go',
-  rust: 'rust',
-  kotlin: 'kotlin',
-  sql: 'sql',
-  bash: 'bash',
-  shell: 'bash',
-}
-
-function SyntaxCode({ code, language, mode }: { code: string; language: string; mode: PaletteMode }) {
-  const normalizedLanguage = languageAliases[language.trim().toLowerCase()] ?? 'text'
-  return (
-    <Highlight theme={mode === 'dark' ? themes.vsDark : themes.github} code={code} language={normalizedLanguage}>
-      {({ style, tokens, getLineProps, getTokenProps }) => (
-        <Box
-          component="pre"
-          sx={{ m: 0, p: 2, overflow: 'auto', borderRadius: 1, fontFamily: 'monospace', fontSize: 13, lineHeight: 1.7 }}
-          style={style}
-        >
-          {tokens.map((line, index) => (
-            <Box component="div" key={index} {...getLineProps({ line })}>
-              {line.map((token, tokenIndex) => <span key={tokenIndex} {...getTokenProps({ token })} />)}
-            </Box>
-          ))}
-        </Box>
-      )}
-    </Highlight>
-  )
-}

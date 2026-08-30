@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildTagTree, fingerprint, mergeImportPreview, parseDocument, previewImports,
-  previewProblemList, resolveLocalCloudMigration,
+  buildTagTree, fingerprint, mergeImportPreview, parseDocument, parseStoredDocument, previewImports,
+  previewProblemList, resolveLocalCloudMigration, updateCustomTag,
 } from './data'
+import { algorithms, buildAlgorithmTree, suggestAlgorithmIds } from './algorithmCatalog'
 
 const legacy = {
   id: 'one',
@@ -21,11 +22,24 @@ describe('data migration', () => {
     expect(problem.solutions).toHaveLength(1)
     expect(problem.solutions[0]).toMatchObject({ language: 'C++', code: 'int main() {}' })
     expect(problem.createdAt).toBe(legacy.createdAt)
+    expect(problem.customTags).toEqual(['数组/双指针'])
+    expect(problem.algorithmIds).toEqual([])
   })
 
   it('accepts a versioned backup document', () => {
     const [problem] = parseDocument({ schemaVersion: 2, problems: [legacy] })
     expect(problem.title).toBe('旧题目')
+  })
+
+  it('loads v3 templates and removes unknown system ids', () => {
+    const document = parseStoredDocument({
+      schemaVersion: 3,
+      problems: [{ ...legacy, algorithmIds: [algorithms[0].id, 'missing'] }],
+      templates: [{ id: 'template', title: '并查集', tags: ['旧模板标签'], variants: [{ language: 'C++', code: 'int f;' }] }],
+    })
+    expect(document.problems[0].algorithmIds).toEqual([algorithms[0].id])
+    expect(document.templates[0].customTags).toEqual(['旧模板标签'])
+    expect(document.templates[0].variants[0].language).toBe('C++')
   })
 })
 
@@ -36,6 +50,19 @@ describe('tag tree', () => {
     const tree = buildTagTree([first, second])
     expect(tree[0]).toMatchObject({ id: '数组', count: 2 })
     expect(tree[0].children.map((node) => node.id)).toEqual(['数组/排序', '数组/双指针'])
+  })
+
+  it('builds the system hierarchy and rewrites custom tag descendants', () => {
+    const tree = buildAlgorithmTree([algorithms[0].id])
+    expect(tree.some((node) => node.algorithmIds?.includes(algorithms[0].id))).toBe(true)
+    const [updated] = updateCustomTag(parseDocument([legacy]), '数组', '线性结构')
+    expect(updated.customTags).toEqual(['线性结构/双指针'])
+  })
+
+  it('suggests system tags from problem content without writing them automatically', () => {
+    const segmentTree = algorithms.find((tag) => tag.name.includes('线段树'))
+    expect(segmentTree).toBeTruthy()
+    expect(suggestAlgorithmIds('使用线段树维护区间最大值')).toContain(segmentTree!.id)
   })
 })
 
@@ -85,7 +112,7 @@ describe('local and cloud conflict strategies', () => {
 
   it('merges collections and preserves both conflicting notes', () => {
     const merged = resolveLocalCloudMigration(cloud, preview, 'merge').problems[0]
-    expect(merged.tags).toEqual(['数组', '哈希表'])
+    expect(merged.customTags).toEqual(['数组', '哈希表'])
     expect(merged.attempts).toHaveLength(2)
     expect(merged.notes).toContain('云端笔记')
     expect(merged.notes).toContain('本地笔记')

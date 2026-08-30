@@ -1,9 +1,11 @@
-import type { ImportPreview, Problem, StoredDocument, TagNode } from './model'
-import { createProblem, createSolution } from './model'
+import type { CodeTemplate, ImportPreview, Problem, StoredDocument, TagNode } from './model'
+import { createCodeTemplate, createProblem, createSolution, createTemplateVariant } from './model'
+import { validAlgorithmIds } from './algorithmCatalog'
 
-export const STORAGE_KEY = 'algolog.document.v2'
+export const STORAGE_KEY = 'algolog.document.v3'
+export const V2_STORAGE_KEY = 'algolog.document.v2'
 export const LEGACY_STORAGE_KEY = 'algolog.problems.v1'
-export const BACKUP_FINGERPRINT_KEY = 'algolog.backup-fingerprint.v2'
+export const BACKUP_FINGERPRINT_KEY = 'algolog.backup-fingerprint.v3'
 
 const legacySeeds = [
   {
@@ -15,7 +17,7 @@ const legacySeeds = [
     statement: '给定一个整数数组 nums 和一个整数目标值 target，请在数组中找出和为目标值的两个整数。',
     input: 'nums = [2,7,11,15], target = 9',
     output: '[0,1]',
-    tags: ['数组/哈希表', '经典题'],
+    customTags: ['数组/哈希表', '经典题'],
     solutions: [
       {
         id: 'seed-two-sum-ts',
@@ -48,7 +50,7 @@ const legacySeeds = [
     statement: '找出数组中所有和为 0 且不重复的三元组。',
     input: 'nums = [-1,0,1,2,-1,-4]',
     output: '[[-1,-1,2],[-1,0,1]]',
-    tags: ['数组/双指针', '排序', '经典题'],
+    customTags: ['数组/双指针', '排序', '经典题'],
     solutions: [{
       id: 'seed-three-sum-ts',
       language: 'TypeScript',
@@ -75,7 +77,7 @@ const legacySeeds = [
     statement: '设计并实现一个满足最近最少使用淘汰策略的缓存。',
     input: 'LRUCache(capacity), get(key), put(key, value)',
     output: 'get 返回对应值或 -1',
-    tags: ['设计/缓存', '链表/双向链表', '哈希表'],
+    customTags: ['设计/缓存', '链表/双向链表', '哈希表'],
     solutions: [{
       id: 'seed-lru-ts',
       language: 'TypeScript',
@@ -145,7 +147,10 @@ export function migrateProblem(value: unknown): Problem {
     statement: text(value.statement),
     input: text(value.input),
     output: text(value.output),
-    tags: Array.isArray(value.tags) ? value.tags.map((tag) => text(tag)).filter(Boolean) : [],
+    customTags: Array.isArray(value.customTags)
+      ? value.customTags.map((tag) => text(tag).trim()).filter(Boolean)
+      : Array.isArray(value.tags) ? value.tags.map((tag) => text(tag).trim()).filter(Boolean) : [],
+    algorithmIds: validAlgorithmIds(value.algorithmIds),
     solutions,
     status,
     attempts,
@@ -162,15 +167,60 @@ export function parseDocument(value: unknown): Problem[] {
   return list.map(migrateProblem)
 }
 
+export function migrateTemplate(value: unknown): CodeTemplate {
+  if (!isRecord(value) || !text(value.title).trim()) throw new Error('模板缺少名称')
+  const base = createCodeTemplate()
+  const templateId = text(value.id) || base.id
+  const rawVariants = Array.isArray(value.variants) ? value.variants : []
+  const variants = rawVariants.length
+    ? rawVariants.flatMap((item, index) => isRecord(item) ? [{
+        ...createTemplateVariant(),
+        id: text(item.id) || `${templateId}-variant-${index + 1}`,
+        language: text(item.language, 'C++'),
+        code: text(item.code),
+      }] : [])
+    : [createTemplateVariant()]
+  return {
+    ...base,
+    id: templateId,
+    title: text(value.title),
+    description: text(value.description),
+    customTags: Array.isArray(value.customTags)
+      ? value.customTags.map((tag) => text(tag).trim()).filter(Boolean)
+      : Array.isArray(value.tags) ? value.tags.map((tag) => text(tag).trim()).filter(Boolean) : [],
+    algorithmIds: validAlgorithmIds(value.algorithmIds),
+    variants: variants.length ? variants : [createTemplateVariant()],
+    createdAt: text(value.createdAt) || base.createdAt,
+    updatedAt: text(value.updatedAt) || text(value.createdAt) || base.updatedAt,
+  }
+}
+
+export function parseStoredDocument(value: unknown): StoredDocument {
+  const record = isRecord(value) ? value : null
+  const problems = parseDocument(record?.problems ?? value)
+  const templates = Array.isArray(record?.templates) ? record.templates.map(migrateTemplate) : []
+  return { schemaVersion: 3, problems, templates }
+}
+
 export function loadProblems(): { problems: Problem[]; error?: string } {
+  const result = loadDocument()
+  return { problems: result.document.problems, error: result.error }
+}
+
+export function loadDocument(): { document: StoredDocument; error?: string } {
   try {
     const current = localStorage.getItem(STORAGE_KEY)
-    if (current) return { problems: parseDocument(JSON.parse(current)) }
+    if (current) return { document: parseStoredDocument(JSON.parse(current)) }
+    const v2 = localStorage.getItem(V2_STORAGE_KEY)
+    if (v2) return { document: parseStoredDocument(JSON.parse(v2)) }
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
-    if (legacy) return { problems: parseDocument(JSON.parse(legacy)) }
-    return { problems: getDemoProblems() }
+    if (legacy) return { document: parseStoredDocument(JSON.parse(legacy)) }
+    return { document: { schemaVersion: 3, problems: getDemoProblems(), templates: [] } }
   } catch {
-    return { problems: getDemoProblems(), error: '本地数据无法读取，已显示示例数据；原数据未被覆盖。' }
+    return {
+      document: { schemaVersion: 3, problems: getDemoProblems(), templates: [] },
+      error: '本地数据无法读取，已显示示例数据；原数据未被覆盖。',
+    }
   }
 }
 
@@ -178,6 +228,8 @@ export function loadLocalMigrationProblems(): Problem[] {
   try {
     const current = localStorage.getItem(STORAGE_KEY)
     if (current) return parseDocument(JSON.parse(current))
+    const v2 = localStorage.getItem(V2_STORAGE_KEY)
+    if (v2) return parseDocument(JSON.parse(v2))
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
     return legacy ? parseDocument(JSON.parse(legacy)) : []
   } catch {
@@ -186,12 +238,16 @@ export function loadLocalMigrationProblems(): Problem[] {
 }
 
 export function saveProblems(problems: Problem[]) {
-  const document: StoredDocument = { schemaVersion: 2, problems }
+  const templates = loadDocument().document.templates
+  saveDocument({ schemaVersion: 3, problems, templates })
+}
+
+export function saveDocument(document: StoredDocument) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(document))
 }
 
-export function fingerprint(problems: Problem[]) {
-  return JSON.stringify(problems)
+export function fingerprint(value: unknown) {
+  return JSON.stringify(value)
 }
 
 export function downloadJson(value: unknown, filename: string) {
@@ -318,7 +374,8 @@ function mergeProblemVersions(cloud: Problem, local: Problem): Problem {
     statement: chooseText('statement') as string,
     input: chooseText('input') as string,
     output: chooseText('output') as string,
-    tags: [...new Set([...cloud.tags, ...local.tags])],
+    customTags: [...new Set([...cloud.customTags, ...local.customTags])],
+    algorithmIds: [...new Set([...cloud.algorithmIds, ...local.algorithmIds])],
     solutions: [...solutions.values()],
     attempts: [...attempts.values()].sort((a, b) => a.attemptedAt.localeCompare(b.attemptedAt)),
     hints: cloud.hints.map((hint, index) => (localIsNewer ? local.hints[index] || hint : hint || local.hints[index])) as [string, string, string],
@@ -328,11 +385,11 @@ function mergeProblemVersions(cloud: Problem, local: Problem): Problem {
   }
 }
 
-export function buildTagTree(problems: Problem[]): TagNode[] {
+export function buildTagTree(items: Array<Pick<Problem, 'customTags'>>): TagNode[] {
   const roots: TagNode[] = []
   const byPath = new Map<string, TagNode>()
-  for (const problem of problems) {
-    for (const tag of problem.tags) {
+  for (const item of items) {
+    for (const tag of item.customTags) {
       const segments = tag.split('/').map((part) => part.trim()).filter(Boolean)
       segments.forEach((label, index) => {
         const path = segments.slice(0, index + 1).join('/')
@@ -352,19 +409,18 @@ export function buildTagTree(problems: Problem[]): TagNode[] {
   return roots
 }
 
-const tagRules: Array<[RegExp, string]> = [
-  [/数组|array|nums/i, '数组'],
-  [/双指针|two pointers?/i, '数组/双指针'],
-  [/哈希|hash|map|set/i, '哈希表'],
-  [/链表|linked list/i, '链表'],
-  [/二叉树|binary tree/i, '树/二叉树'],
-  [/动态规划|dp\b|状态转移/i, '动态规划'],
-  [/回溯|backtrack/i, '搜索/回溯'],
-  [/排序|sort/i, '排序'],
-]
-
-export function suggestTags(problem: Problem) {
-  const code = problem.solutions.map((solution) => solution.code).join(' ')
-  const source = [problem.title, problem.statement, problem.input, problem.output, code, problem.notes].join(' ')
-  return tagRules.filter(([pattern]) => pattern.test(source)).map(([, tag]) => tag)
+export function updateCustomTag<T extends Pick<Problem, 'customTags'>>(
+  items: T[],
+  source: string,
+  replacement?: string,
+): T[] {
+  const target = replacement?.trim()
+  return items.map((item) => ({
+    ...item,
+    customTags: [...new Set(item.customTags.flatMap((tag) => {
+      if (tag !== source && !tag.startsWith(`${source}/`)) return [tag]
+      if (!target) return []
+      return [`${target}${tag.slice(source.length)}`]
+    }))],
+  }))
 }

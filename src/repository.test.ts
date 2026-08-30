@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { parseDocument } from './data'
 import {
   localMigrationCompleted, markLocalMigrationCompleted, problemToRpcPayload, readCloudCache,
-  rowToProblem, writeCloudCache,
+  rowToProblem, rowToTemplate, templateToRpcPayload, writeCloudCache,
 } from './repository'
-import type { DbProblemRow } from './repository'
+import type { DbProblemRow, DbTemplateRow } from './repository'
 
 const values = new Map<string, string>()
 Object.defineProperty(globalThis, 'localStorage', {
@@ -29,7 +29,8 @@ describe('Supabase model mapping', () => {
       statement: 'statement',
       input_text: 'input',
       output_text: 'output',
-      tags: ['数组/双指针'],
+      custom_tags: ['数组/双指针'],
+      algorithm_ids: [],
       hints: ['one', 'two', 'three'],
       notes: '$O(n)$',
       status: 'thinking',
@@ -48,7 +49,24 @@ describe('Supabase model mapping', () => {
     const problem = rowToProblem(row)
     expect(problem).toMatchObject({ id: 'external-id', input: 'input', output: 'output', status: 'thinking' })
     expect(problem.solutions[0].timeComplexity).toBe('O(n)')
+    expect(problem.customTags).toEqual(['数组/双指针'])
     expect(problem.attempts[0].attemptedAt).toBe('2026-01-03T00:00:00.000Z')
+  })
+
+  it('maps templates and creates their RPC payload', () => {
+    const row: DbTemplateRow = {
+      external_id: 'template-id',
+      title: '树状数组',
+      description: '维护前缀和',
+      custom_tags: ['常用'],
+      algorithm_ids: [],
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-02T00:00:00.000Z',
+      template_variants: [{ id: 'variant-id', language: 'C++', code: 'struct BIT {};', position: 0 }],
+    }
+    const template = rowToTemplate(row)
+    expect(template.variants[0].code).toContain('BIT')
+    expect(templateToRpcPayload(template)).toMatchObject({ id: 'template-id', customTags: ['常用'] })
   })
 
   it('creates the RPC payload without database-only fields', () => {

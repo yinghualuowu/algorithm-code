@@ -24,7 +24,8 @@ export interface Problem {
   statement: string
   input: string
   output: string
-  tags: string[]
+  customTags: string[]
+  algorithmIds: string[]
   solutions: Solution[]
   status: ProblemStatus
   attempts: Attempt[]
@@ -34,9 +35,35 @@ export interface Problem {
   updatedAt: string
 }
 
+export interface AlgorithmTag {
+  id: string
+  name: string
+  category: string
+  group: string
+  level: string
+}
+
+export interface TemplateVariant {
+  id: string
+  language: string
+  code: string
+}
+
+export interface CodeTemplate {
+  id: string
+  title: string
+  description: string
+  customTags: string[]
+  algorithmIds: string[]
+  variants: TemplateVariant[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface StoredDocument {
-  schemaVersion: 2
+  schemaVersion: 3
   problems: Problem[]
+  templates: CodeTemplate[]
 }
 
 export interface ImportConflict {
@@ -58,6 +85,7 @@ export interface TagNode {
   id: string
   label: string
   count: number
+  algorithmIds?: string[]
   children: TagNode[]
 }
 
@@ -75,6 +103,26 @@ export const createSolution = (): Solution => ({
   spaceComplexity: '',
 })
 
+export const createTemplateVariant = (): TemplateVariant => ({
+  id: crypto.randomUUID(),
+  language: 'C++',
+  code: '',
+})
+
+export const createCodeTemplate = (): CodeTemplate => {
+  const now = new Date().toISOString()
+  return {
+    id: crypto.randomUUID(),
+    title: '',
+    description: '',
+    customTags: [],
+    algorithmIds: [],
+    variants: [createTemplateVariant()],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export const createProblem = (): Problem => {
   const now = new Date().toISOString()
   return {
@@ -86,7 +134,8 @@ export const createProblem = (): Problem => {
     statement: '',
     input: '',
     output: '',
-    tags: [],
+    customTags: [],
+    algorithmIds: [],
     solutions: [createSolution()],
     status: 'pending',
     attempts: [],

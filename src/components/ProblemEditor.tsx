@@ -1,36 +1,42 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import {
-  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl,
+  Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl,
   IconButton, InputLabel, MenuItem, Select, Stack, TextField, Typography, useMediaQuery, useTheme,
 } from '@mui/material'
 import type { Difficulty, Problem, ProblemStatus, Solution } from '../model'
 import { createSolution } from '../model'
-import { suggestTags } from '../data'
+import AlgorithmSelector from './AlgorithmSelector'
+import { algorithmById, suggestAlgorithmIds } from '../algorithmCatalog'
 
 interface Props {
   value: Problem
   busy?: boolean
   onClose: () => void
   onSave: (problem: Problem) => void | Promise<void>
+  customTagOptions?: string[]
 }
 
-export default function ProblemEditor({ value, busy = false, onClose, onSave }: Props) {
+export default function ProblemEditor({ value, busy = false, onClose, onSave, customTagOptions = [] }: Props) {
   const [draft, setDraft] = useState(value)
-  const [tagInput, setTagInput] = useState(value.tags.join(', '))
   const theme = useTheme()
   const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const update = <K extends keyof Problem>(key: K, next: Problem[K]) =>
     setDraft((old) => ({ ...old, [key]: next }))
   const updateSolution = (id: string, patch: Partial<Solution>) =>
     update('solutions', draft.solutions.map((solution) => solution.id === id ? { ...solution, ...patch } : solution))
+  const suggestions = useMemo(() => {
+    const source = [
+      draft.title, draft.statement, draft.input, draft.output, draft.notes,
+      ...draft.solutions.flatMap((solution) => [solution.language, solution.code]),
+    ].join('\n')
+    return suggestAlgorithmIds(source).filter((id) => !draft.algorithmIds.includes(id))
+  }, [draft])
 
   const submit = () => {
     if (!draft.title.trim()) return
-    const tags = tagInput.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean)
-    const withTags = { ...draft, tags }
-    onSave({ ...withTags, tags: [...new Set([...tags, ...suggestTags(withTags)])] })
+    onSave({ ...draft, customTags: [...new Set(draft.customTags.map((tag) => tag.trim()).filter(Boolean))] })
   }
 
   return (
@@ -62,7 +68,32 @@ export default function ProblemEditor({ value, busy = false, onClose, onSave }: 
             <TextField label="输入" multiline minRows={3} value={draft.input} onChange={(e) => update('input', e.target.value)} />
             <TextField label="输出" multiline minRows={3} value={draft.output} onChange={(e) => update('output', e.target.value)} />
           </Box>
-          <TextField label="知识点标签" helperText="多个标签用逗号分隔；父子层级使用 /" value={tagInput} onChange={(e) => setTagInput(e.target.value)} />
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>系统算法标签</Typography>
+            <AlgorithmSelector compact value={draft.algorithmIds} onChange={(ids) => update('algorithmIds', ids)} />
+            {!!suggestions.length && (
+              <Box sx={{ mt: 1.5 }}>
+                <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+                  <Typography variant="caption" color="text.secondary">内容联想：</Typography>
+                  {suggestions.map((id) => {
+                    const tag = algorithmById.get(id)
+                    return tag ? (
+                      <Chip
+                        key={id} size="small" variant="outlined" label={`+ ${tag.name}`}
+                        onClick={() => update('algorithmIds', [...draft.algorithmIds, id])}
+                      />
+                    ) : null
+                  })}
+                  <Button size="small" onClick={() => update('algorithmIds', [...new Set([...draft.algorithmIds, ...suggestions])])}>应用全部</Button>
+                </Stack>
+              </Box>
+            )}
+          </Box>
+          <Autocomplete
+            multiple freeSolo options={customTagOptions} value={draft.customTags}
+            onChange={(_, tags) => update('customTags', tags.map((tag) => tag.trim()).filter(Boolean))}
+            renderInput={(params) => <TextField {...params} label="自定义标签" helperText="输入后按回车；旧标签会无损保留在这里" />}
+          />
           <Divider />
           <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="h6">代码方案</Typography>

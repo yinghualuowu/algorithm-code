@@ -1,5 +1,5 @@
-import type { Problem, Solution, Attempt } from './model'
-import { migrateProblem, parseDocument } from './data'
+import type { Problem, Solution, Attempt, CodeTemplate } from './model'
+import { migrateProblem, migrateTemplate, parseDocument } from './data'
 import { supabase } from './lib/supabase'
 
 export interface DbSolutionRow {
@@ -25,7 +25,8 @@ export interface DbProblemRow {
   statement: string
   input_text: string
   output_text: string
-  tags: string[]
+  custom_tags: string[]
+  algorithm_ids: string[]
   hints: string[]
   notes: string
   status: Problem['status']
@@ -69,7 +70,8 @@ export function rowToProblem(row: DbProblemRow): Problem {
     statement: row.statement,
     input: row.input_text,
     output: row.output_text,
-    tags: row.tags,
+    customTags: row.custom_tags,
+    algorithmIds: row.algorithm_ids,
     hints,
     notes: row.notes,
     status: row.status,
@@ -90,7 +92,8 @@ export function problemToRpcPayload(problem: Problem) {
     statement: problem.statement,
     input: problem.input,
     output: problem.output,
-    tags: problem.tags,
+    customTags: problem.customTags,
+    algorithmIds: problem.algorithmIds,
     hints: problem.hints,
     notes: problem.notes,
     status: problem.status,
@@ -106,7 +109,7 @@ export async function fetchCloudProblems(userId: string): Promise<Problem[]> {
     .from('problems')
     .select(`
       external_id, title, url, source, difficulty, statement, input_text, output_text,
-      tags, hints, notes, status, created_at, updated_at,
+      custom_tags, algorithm_ids, hints, notes, status, created_at, updated_at,
       problem_solutions (id, language, code, time_complexity, space_complexity, position),
       problem_attempts (id, attempted_at)
     `)
@@ -126,7 +129,7 @@ export function readCloudCache(userId: string): Problem[] {
 }
 
 export function writeCloudCache(userId: string, problems: Problem[]) {
-  localStorage.setItem(cacheKey(userId), JSON.stringify({ schemaVersion: 2, problems }))
+  localStorage.setItem(cacheKey(userId), JSON.stringify({ schemaVersion: 3, problems, templates: [] }))
 }
 
 export async function loadCloudProblems(userId: string): Promise<CloudLoadResult> {
@@ -161,6 +164,95 @@ export async function saveCloudProblems(problems: Problem[]) {
 
 export async function deleteCloudProblem(problemId: string) {
   const { error } = await supabase.from('problems').delete().eq('external_id', problemId)
+  if (error) throw error
+}
+
+export interface DbTemplateRow {
+  external_id: string
+  title: string
+  description: string
+  custom_tags: string[]
+  algorithm_ids: string[]
+  created_at: string
+  updated_at: string
+  template_variants: Array<{ id: string; language: string; code: string; position: number }>
+}
+
+const templateCacheKey = (userId: string) => `algolog.template-cache.v1.${userId}`
+
+export function rowToTemplate(row: DbTemplateRow): CodeTemplate {
+  return migrateTemplate({
+    id: row.external_id,
+    title: row.title,
+    description: row.description,
+    customTags: row.custom_tags,
+    algorithmIds: row.algorithm_ids,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    variants: [...(row.template_variants ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((item) => ({ id: item.id, language: item.language, code: item.code })),
+  })
+}
+
+export function templateToRpcPayload(template: CodeTemplate) {
+  return {
+    id: template.id,
+    title: template.title,
+    description: template.description,
+    customTags: template.customTags,
+    algorithmIds: template.algorithmIds,
+    variants: template.variants,
+    createdAt: template.createdAt,
+    updatedAt: template.updatedAt,
+  }
+}
+
+export async function fetchCloudTemplates(userId: string): Promise<CodeTemplate[]> {
+  const { data, error } = await supabase
+    .from('code_templates')
+    .select('external_id, title, description, custom_tags, algorithm_ids, created_at, updated_at, template_variants (id, language, code, position)')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+  if (error) throw error
+  return ((data ?? []) as unknown as DbTemplateRow[]).map(rowToTemplate)
+}
+
+export function readTemplateCache(userId: string): CodeTemplate[] {
+  try {
+    const value = localStorage.getItem(templateCacheKey(userId))
+    const parsed: unknown = value ? JSON.parse(value) : []
+    return Array.isArray(parsed) ? parsed.map(migrateTemplate) : []
+  } catch {
+    return []
+  }
+}
+
+export async function loadCloudTemplates(userId: string, offline = false): Promise<CodeTemplate[]> {
+  if (offline) return readTemplateCache(userId)
+  try {
+    const templates = await fetchCloudTemplates(userId)
+    localStorage.setItem(templateCacheKey(userId), JSON.stringify(templates))
+    return templates
+  } catch {
+    const cached = readTemplateCache(userId)
+    if (localStorage.getItem(templateCacheKey(userId))) return cached
+    throw new Error('无法加载云端模板。请确认已执行最新 Supabase migration。')
+  }
+}
+
+export async function saveCloudTemplate(template: CodeTemplate) {
+  const { data, error } = await supabase.rpc('save_code_template', { p_template: templateToRpcPayload(template) })
+  if (error) throw error
+  return data as string
+}
+
+export async function saveCloudTemplates(templates: CodeTemplate[]) {
+  for (const template of templates) await saveCloudTemplate(template)
+}
+
+export async function deleteCloudTemplate(templateId: string) {
+  const { error } = await supabase.from('code_templates').delete().eq('external_id', templateId)
   if (error) throw error
 }
 
